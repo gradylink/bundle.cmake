@@ -58,6 +58,7 @@ typedef struct bundle_stream {
   unsigned char window[32768];
   size_t window_start;
   size_t window_avail;
+  size_t dict_pos;
 } bundle_stream;
 
 /** @return BUNDLE_OK or BUNDLE_ERROR_* */

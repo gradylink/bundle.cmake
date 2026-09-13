@@ -250,16 +250,16 @@ static long bundle__codec_fill(bundle_stream *stream) {
   tinfl_decompressor *decomp = (tinfl_decompressor *)stream->codec_state;
   size_t in_bytes, out_bytes;
   tinfl_status status;
-  unsigned int flags = TINFL_FLAG_USING_NON_WRAPPING_OUTPUT_BUF;
+  unsigned int flags = 0;
 
   if (stream->remaining_uncompressed == 0) {
     return 0;
   }
 
   in_bytes = stream->remaining_compressed;
-  out_bytes = sizeof(stream->window);
+  out_bytes = sizeof(stream->window) - stream->dict_pos;
 
-  status = tinfl_decompress(decomp, stream->cursor, &in_bytes, stream->window, stream->window, &out_bytes, flags);
+  status = tinfl_decompress(decomp, stream->cursor, &in_bytes, stream->window, stream->window + stream->dict_pos, &out_bytes, flags);
 
   stream->cursor += in_bytes;
   stream->remaining_compressed -= in_bytes;
@@ -270,6 +270,9 @@ static long bundle__codec_fill(bundle_stream *stream) {
   if (status == TINFL_STATUS_NEEDS_MORE_INPUT && out_bytes == 0) {
     return BUNDLE_ERROR_CORRUPT;
   }
+
+  stream->window_start = stream->dict_pos;
+  stream->dict_pos = (stream->dict_pos + out_bytes) % sizeof(stream->window);
 
   return (long)out_bytes;
 }
@@ -385,7 +388,6 @@ size_t bundle_read(bundle_stream *stream, void *out, size_t max_len) {
       if ((size_t)produced > stream->remaining_uncompressed) {
         produced = (long)stream->remaining_uncompressed;
       }
-      stream->window_start = 0;
       stream->window_avail = (size_t)produced;
       stream->remaining_uncompressed -= (size_t)produced;
     }
