@@ -63,28 +63,45 @@ function(_bundle_stage_and_archive NAME OUTPUT_DIR COMPRESSION REAL_FILES VIRTUA
     file(COPY "${SRC}" DESTINATION "${DST_DIR}")
   endforeach()
 
-  if(COMPRESSION STREQUAL "STORE")
-    if(CMAKE_VERSION VERSION_LESS "4.3")
-      _bundle_log(WARNING "bundle_add(${NAME}): COMPRESSION STORE requires CMake >= 4.3 (got ${CMAKE_VERSION}) - falling back to DEFLATE")
-      set(COMPRESSION_ARGS "")
-    else()
-      set(COMPRESSION_ARGS COMPRESSION None)
-    endif()
-  elseif(COMPRESSION STREQUAL "DEFLATE")
-    set(COMPRESSION_ARGS "")
-  else()
+  if(NOT COMPRESSION STREQUAL "STORE" AND NOT COMPRESSION STREQUAL "DEFLATE")
     _bundle_log(FATAL_ERROR "bundle_add(${NAME}): COMPRESSION must be STORE or DEFLATE, got '${COMPRESSION}'")
   endif()
 
   set(PAK_FILE "${OUTPUT_DIR}/${NAME}.pak")
   file(REMOVE "${PAK_FILE}")
-  file(ARCHIVE_CREATE
-    OUTPUT "${PAK_FILE}"
-    PATHS ${VIRTUAL_PATHS}
-    FORMAT zip
-    ${COMPRESSION_ARGS}
-    WORKING_DIRECTORY "${STAGE_DIR}"
-  )
+
+  if(CMAKE_VERSION VERSION_LESS "3.31")
+    if(COMPRESSION STREQUAL "STORE")
+      _bundle_log(STATUS "bundle_add(${NAME}): COMPRESSION STORE needs CMake >= 3.31 for file(ARCHIVE_CREATE WORKING_DIRECTORY) - using DEFLATE instead (got ${CMAKE_VERSION})")
+    endif()
+    execute_process(
+      COMMAND ${CMAKE_COMMAND} -E tar cf "${PAK_FILE}" --format=zip -- ${VIRTUAL_PATHS}
+      WORKING_DIRECTORY "${STAGE_DIR}"
+      RESULT_VARIABLE _BUNDLE_TAR_RESULT
+    )
+    if(NOT _BUNDLE_TAR_RESULT EQUAL 0)
+      _bundle_log(FATAL_ERROR "bundle_add(${NAME}): failed to create ${PAK_FILE} (cmake -E tar exited with ${_BUNDLE_TAR_RESULT})")
+    endif()
+  else()
+    if(COMPRESSION STREQUAL "STORE")
+      if(CMAKE_VERSION VERSION_LESS "4.3")
+        _bundle_log(WARNING "bundle_add(${NAME}): COMPRESSION STORE requires CMake >= 4.3 (got ${CMAKE_VERSION}) - falling back to DEFLATE")
+        set(COMPRESSION_ARGS "")
+      else()
+        set(COMPRESSION_ARGS COMPRESSION None)
+      endif()
+    else()
+      set(COMPRESSION_ARGS "")
+    endif()
+
+    file(ARCHIVE_CREATE
+      OUTPUT "${PAK_FILE}"
+      PATHS ${VIRTUAL_PATHS}
+      FORMAT zip
+      ${COMPRESSION_ARGS}
+      WORKING_DIRECTORY "${STAGE_DIR}"
+    )
+  endif()
 
   set(${OUT_PAK_FILE} "${PAK_FILE}" PARENT_SCOPE)
 endfunction()
