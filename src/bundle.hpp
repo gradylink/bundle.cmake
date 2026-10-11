@@ -94,8 +94,14 @@ public:
 
   istream(const istream &) = delete;
   istream &operator=(const istream &) = delete;
-  istream(istream &&) = default;
-  istream &operator=(istream &&) = default;
+
+  istream(istream &&other) noexcept : std::istream(std::move(other)), buf_(std::move(other.buf_)) { rdbuf(buf_.get()); }
+  istream &operator=(istream &&other) noexcept {
+    std::istream::operator=(std::move(other));
+    buf_ = std::move(other.buf_);
+    rdbuf(buf_.get());
+    return *this;
+  }
 
 private:
   std::unique_ptr<streambuf> buf_;

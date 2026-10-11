@@ -64,7 +64,12 @@ function(_bundle_stage_and_archive NAME OUTPUT_DIR COMPRESSION REAL_FILES VIRTUA
   endforeach()
 
   if(COMPRESSION STREQUAL "STORE")
-    set(COMPRESSION_ARGS COMPRESSION None)
+    if(CMAKE_VERSION VERSION_LESS "4.3")
+      _bundle_log(WARNING "bundle_add(${NAME}): COMPRESSION STORE requires CMake >= 4.3 (got ${CMAKE_VERSION}) - falling back to DEFLATE")
+      set(COMPRESSION_ARGS "")
+    else()
+      set(COMPRESSION_ARGS COMPRESSION None)
+    endif()
   elseif(COMPRESSION STREQUAL "DEFLATE")
     set(COMPRESSION_ARGS "")
   else()
