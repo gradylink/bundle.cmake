@@ -38,6 +38,18 @@ C++.
 - `bundle_open`/`bundle_read`/`bundle_close` for streaming,
 - `bundle_read_all`/`bundle_load` for one-shot reads.
 - `bundle::istream`, `extract_to()`, `entries_with_prefix()`.
+- Every fallible `bundle::` call (`find`, `size`, `load`, `load_text`,
+  `extract_to`, `open`) takes an optional trailing `int *ec`. Pass nothing and
+  it throws `bundle::error` on failure, same as always. Pass `&ec` and it sets
+  `*ec` to a `BUNDLE_ERROR_*` code instead of throwing, which also works when
+  exceptions are disabled.
+- `BUNDLE_NO_EXCEPTIONS` - define to `1` before including `bundle.hpp` to
+  require the `ec` form: calling a fallible method without `ec` then aborts
+  instead of throwing. It's set automatically when the compiler has
+  exceptions disabled (`-fno-exceptions`, no `/EHsc`), so the header stays
+  usable there without defining anything yourself. `bundle::istream::error()`
+  and `bundle::archive::iterator::error()` report errors that happen mid-read
+  or mid-iteration, where there's no call site to hand an `ec` to.
 
 ## Limitations
 

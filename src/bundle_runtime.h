@@ -31,7 +31,8 @@ enum {
   BUNDLE_ERROR_CORRUPT = -2,
   BUNDLE_ERROR_UNSUPPORTED = -3,
   BUNDLE_ERROR_OUT_OF_MEMORY = -4,
-  BUNDLE_ERROR_BUFFER_TOO_SMALL = -5
+  BUNDLE_ERROR_BUFFER_TOO_SMALL = -5,
+  BUNDLE_ERROR_IO = -6
 };
 
 int bundle_find(const bundle_archive *archive, const char *path, bundle_entry *out);

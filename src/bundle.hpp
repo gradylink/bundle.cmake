@@ -4,6 +4,7 @@
 #include "bundle_runtime.h"
 
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <istream>
@@ -13,6 +14,35 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifndef BUNDLE_NO_EXCEPTIONS
+#if defined(__cpp_exceptions) || defined(__EXCEPTIONS) || defined(_CPPUNWIND)
+#define BUNDLE_NO_EXCEPTIONS 0
+#else
+#define BUNDLE_NO_EXCEPTIONS 1
+#endif
+#endif
+
+#if BUNDLE_NO_EXCEPTIONS
+#define BUNDLE_REPORT(ec, code, what)                                                                                                                                         \
+  do {                                                                                                                                                                        \
+    if (ec) {                                                                                                                                                                 \
+      *(ec) = (code);                                                                                                                                                         \
+    } else {                                                                                                                                                                  \
+      (void)(what);                                                                                                                                                           \
+      std::abort();                                                                                                                                                           \
+    }                                                                                                                                                                         \
+  } while (0)
+#else
+#define BUNDLE_REPORT(ec, code, what)                                                                                                                                         \
+  do {                                                                                                                                                                        \
+    if (ec) {                                                                                                                                                                 \
+      *(ec) = (code);                                                                                                                                                         \
+    } else {                                                                                                                                                                  \
+      throw ::bundle::error((code), (what));                                                                                                                                  \
+    }                                                                                                                                                                         \
+  } while (0)
+#endif
 
 namespace bundle {
 
@@ -51,10 +81,15 @@ private:
 
 class streambuf : public std::streambuf {
 public:
-  explicit streambuf(const entry &e) {
+  explicit streambuf(const entry &e, int *ec = nullptr) {
+    if (ec) {
+      *ec = BUNDLE_OK;
+    }
     int rc = bundle_open(&e.raw(), &stream_);
     if (rc != BUNDLE_OK) {
-      throw error(rc, "bundle::streambuf: bundle_open failed");
+      error_ = rc;
+      BUNDLE_REPORT(ec, rc, "bundle::streambuf: bundle_open failed");
+      return;
     }
     setg(buffer_, buffer_, buffer_);
   }
@@ -64,17 +99,25 @@ public:
   streambuf(const streambuf &) = delete;
   streambuf &operator=(const streambuf &) = delete;
 
+  int error() const noexcept { return error_; }
+
 protected:
   int_type underflow() override {
     if (gptr() < egptr()) {
       return traits_type::to_int_type(*gptr());
+    }
+    if (error_ != BUNDLE_OK) {
+      return traits_type::eof();
     }
 
     size_t n = bundle_read(&stream_, buffer_, sizeof(buffer_));
     if (n == 0) {
       int status = bundle_stream_status(&stream_);
       if (status != BUNDLE_OK) {
-        throw error(status, "bundle::streambuf: bundle_read failed");
+        error_ = status;
+#if !BUNDLE_NO_EXCEPTIONS
+        throw ::bundle::error(status, "bundle::streambuf: bundle_read failed");
+#endif
       }
       return traits_type::eof();
     }
@@ -86,11 +129,12 @@ protected:
 private:
   bundle_stream stream_{};
   char buffer_[65536];
+  int error_ = BUNDLE_OK;
 };
 
 class istream : public std::istream {
 public:
-  explicit istream(const entry &e) : std::istream(nullptr), buf_(std::make_unique<streambuf>(e)) { rdbuf(buf_.get()); }
+  explicit istream(const entry &e, int *ec = nullptr) : std::istream(nullptr), buf_(std::make_unique<streambuf>(e, ec)) { rdbuf(buf_.get()); }
 
   istream(const istream &) = delete;
   istream &operator=(const istream &) = delete;
@@ -103,6 +147,9 @@ public:
     return *this;
   }
 
+  /** Error recorded by the last failed read, or BUNDLE_OK. @sa streambuf::error */
+  int error() const noexcept { return buf_->error(); }
+
 private:
   std::unique_ptr<streambuf> buf_;
 };
@@ -111,7 +158,10 @@ class archive {
 public:
   explicit archive(bundle_archive raw) : raw_(raw) {}
 
-  std::optional<entry> find(std::string_view path) const {
+  std::optional<entry> find(std::string_view path, int *ec = nullptr) const {
+    if (ec) {
+      *ec = BUNDLE_OK;
+    }
     bundle_entry e;
     std::string path_str(path);
     int rc = bundle_find(&raw_, path_str.c_str(), &e);
@@ -119,15 +169,20 @@ public:
       return std::nullopt;
     }
     if (rc != BUNDLE_OK) {
-      throw error(rc, "bundle::archive::find failed");
+      BUNDLE_REPORT(ec, rc, "bundle::archive::find failed");
+      return std::nullopt;
     }
     return entry(e);
   }
 
-  long size() const {
+  long size(int *ec = nullptr) const {
+    if (ec) {
+      *ec = BUNDLE_OK;
+    }
     long n = bundle_entry_count(&raw_);
     if (n < 0) {
-      throw error((int)n, "bundle::archive::size failed");
+      BUNDLE_REPORT(ec, (int)n, "bundle::archive::size failed");
+      return -1;
     }
     return n;
   }
@@ -136,11 +191,15 @@ public:
    * Decompresses the entire entry into memory.
    * @sa bundle::load_text
    */
-  std::vector<std::byte> load(const entry &e) const {
+  std::vector<std::byte> load(const entry &e, int *ec = nullptr) const {
+    if (ec) {
+      *ec = BUNDLE_OK;
+    }
     std::vector<std::byte> buf(e.size());
     long n = bundle_read_all(&e.raw(), buf.data(), buf.size());
     if (n < 0) {
-      throw error((int)n, "bundle::archive::load failed");
+      BUNDLE_REPORT(ec, (int)n, "bundle::archive::load failed");
+      return {};
     }
     return buf;
   }
@@ -149,26 +208,35 @@ public:
    * Convenience for text assets: same as load(), but into a std::string.
    * @sa bundle::load
    */
-  std::string load_text(const entry &e) const {
+  std::string load_text(const entry &e, int *ec = nullptr) const {
+    if (ec) {
+      *ec = BUNDLE_OK;
+    }
     std::string buf(e.size(), '\0');
     long n = bundle_read_all(&e.raw(), buf.data(), buf.size());
     if (n < 0) {
-      throw error((int)n, "bundle::archive::load_text failed");
+      BUNDLE_REPORT(ec, (int)n, "bundle::archive::load_text failed");
+      return {};
     }
     return buf;
   }
 
   /** Streams the entry's decompressed content directly to a file. */
-  void extract_to(const entry &e, const std::filesystem::path &destination) const {
+  void extract_to(const entry &e, const std::filesystem::path &destination, int *ec = nullptr) const {
+    if (ec) {
+      *ec = BUNDLE_OK;
+    }
     std::ofstream out(destination, std::ios::binary);
     if (!out) {
-      throw std::runtime_error("bundle::archive::extract_to: failed to open " + destination.string());
+      BUNDLE_REPORT(ec, BUNDLE_ERROR_IO, "bundle::archive::extract_to: failed to open " + destination.string());
+      return;
     }
 
     bundle_stream stream;
     int rc = bundle_open(&e.raw(), &stream);
     if (rc != BUNDLE_OK) {
-      throw error(rc, "bundle::archive::extract_to: bundle_open failed");
+      BUNDLE_REPORT(ec, rc, "bundle::archive::extract_to: bundle_open failed");
+      return;
     }
 
     char chunk[65536];
@@ -180,11 +248,11 @@ public:
     bundle_close(&stream);
 
     if (rc != BUNDLE_OK) {
-      throw error(rc, "bundle::archive::extract_to: bundle_read failed");
+      BUNDLE_REPORT(ec, rc, "bundle::archive::extract_to: bundle_read failed");
     }
   }
 
-  istream open(const entry &e) const { return istream(e); }
+  istream open(const entry &e, int *ec = nullptr) const { return istream(e, ec); }
 
   class iterator {
   public:
@@ -214,6 +282,9 @@ public:
     friend bool operator==(const iterator &a, const iterator &b) { return a.done_ == b.done_; }
     friend bool operator!=(const iterator &a, const iterator &b) { return !(a == b); }
 
+    /** Error recorded if iteration stopped early, or BUNDLE_OK. */
+    int error() const noexcept { return error_; }
+
   private:
     void advance() {
       bundle_entry e;
@@ -224,13 +295,17 @@ public:
         done_ = true;
       } else {
         done_ = true;
-        throw error(rc, "bundle::archive::iterator: bundle_iter_next failed");
+        error_ = rc;
+#if !BUNDLE_NO_EXCEPTIONS
+        throw ::bundle::error(rc, "bundle::archive::iterator: bundle_iter_next failed");
+#endif
       }
     }
 
     bundle_iterator it_{};
     entry current_{};
     bool done_ = true;
+    int error_ = BUNDLE_OK;
   };
 
   iterator begin() const { return iterator(&raw_); }
@@ -254,5 +329,7 @@ private:
 };
 
 } // namespace bundle
+
+#undef BUNDLE_REPORT
 
 #endif
