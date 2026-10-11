@@ -42,7 +42,10 @@ C++.
 ## Limitations
 
 - `.incbin` requires a GNU-compatible assembler (GCC, Clang, or MinGW) - not
-  MSVC's `ml`/`ml64`/`armasm`.
+  MSVC's `ml`/`ml64`/`armasm`. When building with MSVC (including `clang-cl`),
+  `bundle_add()` automatically falls back to emitting the bundle as a plain C
+  byte array instead of using `.incbin`. This avoids the assembler
+  requirement but is slower to configure and compile for large bundles.
 - Bundles produced by `bundle_add()` are ordinary, non-Zip64, single-disk zip
   files under the hood; reading one with `unzip` works fine, but the runtime
   itself rejects Zip64/multi-disk archives as unsupported (bundles are meant for

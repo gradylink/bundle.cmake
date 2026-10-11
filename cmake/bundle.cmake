@@ -9,8 +9,11 @@ get_property(_BUNDLE_ENABLED_LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
 if(NOT "C" IN_LIST _BUNDLE_ENABLED_LANGUAGES)
   enable_language(C)
 endif()
-if(NOT "ASM" IN_LIST _BUNDLE_ENABLED_LANGUAGES)
-  enable_language(ASM)
+if(NOT MSVC)
+  get_property(_BUNDLE_ENABLED_LANGUAGES GLOBAL PROPERTY ENABLED_LANGUAGES)
+  if(NOT "ASM" IN_LIST _BUNDLE_ENABLED_LANGUAGES)
+    enable_language(ASM)
+  endif()
 endif()
 
 # bundle_add(<name>
@@ -61,7 +64,11 @@ function(bundle_add NAME)
 
   _bundle_ensure_runtime_target()
 
-  add_library(${NAME} STATIC "${ASM_FILE}" "${C_FILE}")
+  set(BUNDLE_SOURCES "${C_FILE}")
+  if(ASM_FILE)
+    list(APPEND BUNDLE_SOURCES "${ASM_FILE}")
+  endif()
+  add_library(${NAME} STATIC ${BUNDLE_SOURCES})
   target_include_directories(${NAME} PUBLIC "${BUNDLE_OUTPUT_DIR}")
   target_link_libraries(${NAME} PUBLIC bundle_runtime)
 
